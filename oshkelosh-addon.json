@@ -1,0 +1,9 @@
+{
+  "addon_id": "airwallex",
+  "addon_name": "Airwallex",
+  "addon_description": "Accept payments via Airwallex.",
+  "category": "payment",
+  "version": "1.0.0",
+  "min_oshkelosh_version": "0.1.0",
+  "python_requires": ">=3.11"
+}
