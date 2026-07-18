@@ -6,14 +6,21 @@ Supports payment intents, refunds, and webhooks.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping
 
 import httpx
 from fastapi import APIRouter
 from pydantic import BaseModel, Field, SecretStr
 
 from app.addons.payments.base import PaymentAddon
-from app.addons.payments.helpers import effective_redirect_url, extract_order_id, mock_checkout
+from app.addons.payments.helpers import (
+    create_payment_error,
+    effective_redirect_url,
+    extract_order_id,
+    header_get,
+    mock_checkout,
+    verify_hmac_sha256_hex,
+)
 from schemas.payment import PaymentWebhookOutcome
 from app.addons.log import info, warning
 from app.addons.config_serialization import dump_addon_config
@@ -182,7 +189,7 @@ class AirwallexAddon(PaymentAddon):
             }
         except Exception as exc:
             warning("Airwallex", "create_payment error: {}", exc)
-            return mock_checkout("airwallex", order_id, amount, currency)
+            return create_payment_error("airwallex", exc, order_id)
 
     async def confirm_payment(self, payment_id: str) -> Dict[str, Any]:
         if not self._client_id:
@@ -235,6 +242,27 @@ class AirwallexAddon(PaymentAddon):
         except Exception as exc:
             warning("Airwallex", "get_payment_status({}) error: {}", payment_id, exc)
             return {"payment_id": payment_id, "status": "error", "detail": str(exc)}
+
+    async def verify_webhook(
+        self,
+        *,
+        headers: Mapping[str, str],
+        body: bytes,
+    ) -> bool:
+        """Verify Airwallex x-signature (HMAC-SHA256 hex of x-timestamp + body)."""
+        if not self._webhook_secret:
+            warning("Airwallex", "verify_webhook skipped: webhook secret not configured")
+            return False
+        signature = header_get(headers, "x-signature")
+        timestamp = header_get(headers, "x-timestamp")
+        if not timestamp:
+            return False
+        return verify_hmac_sha256_hex(
+            self._webhook_secret,
+            body,
+            signature,
+            prefix=timestamp.encode("utf-8"),
+        )
 
     async def parse_webhook(
         self, payload: Dict[str, Any], signature: str
